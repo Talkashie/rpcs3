@@ -703,7 +703,7 @@ rsx::stencil_op rsx::to_stencil_op(u16 in)
 	case CELL_GCM_DECR_WRAP: return rsx::stencil_op::decr_wrap;
 	case CELL_GCM_ZERO: return rsx::stencil_op::zero;
 	}
-	fmt::throw_exception("Unknown stencil op 0x%x" HERE, in);
+	return rsx::stencil_op::invert;
 }
 
 enum
