@@ -26,24 +26,14 @@ namespace rsx
 
 			const u32 addr = get_address(REGS(ctx)->semaphore_offset_406e(), REGS(ctx)->semaphore_context_dma_406e());
 
-			// Synchronization point, may be associated with memory changes without actually changing addresses
+			// Syncronization point, may be associated with memory changes without actually changing addresses
 			RSX(ctx)->m_graphics_state |= rsx::pipeline_state::fragment_program_needs_rehash;
 
 			const auto& sema = vm::_ref<u32>(addr);
 
-			auto flush_pending_semaphore_writes = [&]()
-			{
-				// Experimental fix attempt:
-				// NV406E_SEMAPHORE_ACQUIRE is a hard PFIFO synchronization point.
-				// If an earlier label/semaphore release was queued through the RSX memory
-				// manager or backend path, make that pending work visible before we decide
-				// the semaphore is stuck.
-				rsx::mm_flush();
-			};
-
 			if (sema == arg)
 			{
-				// Flip semaphore doesn't need wake-up delay
+				// Flip semaphore doesnt need wake-up delay
 				if (addr != RSX(ctx)->label_addr + 0x10)
 				{
 					RSX(ctx)->flush_fifo();
@@ -55,15 +45,10 @@ namespace rsx
 			else
 			{
 				RSX(ctx)->flush_fifo();
-
-				// New: force pending memory-manager/backend label writes to retire before
-				// entering the wait loop.
-				flush_pending_semaphore_writes();
 			}
 
 			u64 start = get_system_time();
 			u64 last_check_val = start;
-			u64 last_flush_val = start;
 
 			while (sema != arg)
 			{
@@ -73,18 +58,10 @@ namespace rsx
 					return;
 				}
 
-				const u64 current = get_system_time();
-
-				// New: periodically retry the flush while waiting. This is intentionally
-				// conservative because a semaphore acquire is already a FIFO sync point.
-				if (current - last_flush_val > 1'000)
-				{
-					flush_pending_semaphore_writes();
-					last_flush_val = current;
-				}
-
 				if (const auto tdr = static_cast<u64>(g_cfg.video.driver_recovery_timeout))
 				{
+					const u64 current = get_system_time();
+
 					if (current - last_check_val > 20'000)
 					{
 						// Suspicious amount of time has passed
@@ -147,7 +124,7 @@ namespace rsx
 				arg = 1;
 			}
 
-			util::write_gcm_label<false, true>(ctx, reg, addr, arg);
+			util::write_gcm_label<true, true>(ctx, reg, addr, arg);
 		}
 	}
 }
