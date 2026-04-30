@@ -29,10 +29,15 @@ namespace rsx
 			// Synchronization point, may be associated with memory changes without actually changing addresses
 			RSX(ctx)->m_graphics_state |= rsx::pipeline_state::fragment_program_needs_rehash;
 
-			const auto& sema = vm::_ref(addr);
+			const auto& sema = vm::_ref<u32>(addr);
 
 			auto flush_pending_semaphore_writes = [&]()
 			{
+				// Experimental fix attempt:
+				// NV406E_SEMAPHORE_ACQUIRE is a hard PFIFO synchronization point.
+				// If an earlier label/semaphore release was queued through the RSX memory
+				// manager or backend path, make that pending work visible before we decide
+				// the semaphore is stuck.
 				rsx::mm_flush();
 			};
 
