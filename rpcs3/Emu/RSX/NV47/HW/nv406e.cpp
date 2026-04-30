@@ -20,70 +20,59 @@ namespace rsx
 			dma.ref.store(arg);
 		}
 
-		void semaphore_acquire(context* ctx, u32 /*reg*/, u32 arg)
+		void semaphore_acquire(context* ctx, u32, u32 arg)
 		{
-			RSX(ctx)->sync_point_request.release(true);
-			const u32 addr = get_address(REGS(ctx)->semaphore_offset_406e(), REGS(ctx)->semaphore_context_dma_406e());
+			const u32 addr = RSX(ctx)->label_addr + REGS(ctx)->registers[NV406E_SEMAPHORE_OFFSET];
+			auto& sema = vm::_ref<atomic_t<RsxSemaphore>>(addr);
 
-			// Syncronization point, may be associated with memory changes without actually changing addresses
-			RSX(ctx)->m_graphics_state |= rsx::pipeline_state::fragment_program_needs_rehash;
-
-			const auto& sema = vm::_ref<RsxSemaphore>(addr);
-
-			if (sema == arg)
+			auto flush_pending_semaphore_writes = [&]()
 			{
-				// Flip semaphore doesnt need wake-up delay
-				if (addr != RSX(ctx)->label_addr + 0x10)
-				{
-					RSX(ctx)->flush_fifo();
-					RSX(ctx)->fifo_wake_delay(2);
-				}
+				rsx::mm_flush();
+			};
 
-				return;
-			}
-			else
+			if (sema != arg)
 			{
-				RSX(ctx)->flush_fifo();
+				flush_pending_semaphore_writes();
 			}
 
-			u64 start = get_system_time();
+			u64 start = rsx::uclock();
 			u64 last_check_val = start;
+			u64 last_flush_val = start;
 
 			while (sema != arg)
 			{
-				if (RSX(ctx)->test_stopped())
+				if (Emu.IsStopped())
 				{
-					RSX(ctx)->state += cpu_flag::again;
-					return;
+					break;
+				}
+
+				const u64 current = rsx::uclock();
+
+				// Retry periodically while waiting. This covers cases where the release
+				// is queued or delayed when the acquire first starts polling.
+				if (current - last_flush_val > 1'000)
+				{
+					flush_pending_semaphore_writes();
+					last_flush_val = current;
 				}
 
 				if (const auto tdr = static_cast<u64>(g_cfg.video.driver_recovery_timeout))
 				{
-					const u64 current = get_system_time();
-
 					if (current - last_check_val > 20'000)
 					{
-						// Suspicious amnount of time has passed
-						// External pause such as debuggers' pause or operating system sleep may have taken place
-						// Ignore it
-						start += current - last_check_val;
-					}
+						// Suspicious amount of time has passed.
+						last_check_val = current;
 
-					last_check_val = current;
-
-					if ((current - start) > tdr)
-					{
-						// If longer than driver timeout force exit
-						rsx_log.error("nv406e::semaphore_acquire has timed out. semaphore_address=0x%X", addr);
-						break;
+						if (current - start > tdr * 1'000'000)
+						{
+							rsx_log.error("nv406e::semaphore_acquire has timed out. semaphore_address=0x%x", addr);
+							break;
+						}
 					}
 				}
 
-				RSX(ctx)->cpu_wait({});
+				thread_ctrl::wait_for(50);
 			}
-
-			RSX(ctx)->fifo_wake_delay();
-			RSX(ctx)->performance_counters.idle_time += (get_system_time() - start);
 		}
 
 		void semaphore_release(context* ctx, u32 reg, u32 arg)
