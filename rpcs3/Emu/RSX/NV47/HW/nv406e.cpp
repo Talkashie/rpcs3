@@ -26,29 +26,60 @@ namespace rsx
 
 			const u32 offset = REGS(ctx)->semaphore_offset_406e();
 			const u32 ctxt = REGS(ctx)->semaphore_context_dma_406e();
-			const u32 addr = get_address(offset, ctxt);
+
+			u32 addr = get_address(offset, ctxt);
+
+			const u32 label_candidate_addr = RSX(ctx)->label_addr + offset;
+			const u32 device_candidate_addr = RSX(ctx)->device_addr + offset;
+
+			// Experimental fix:
+			// In the failing Harry Potter case, get_address() resolves the acquire to
+			// device_addr + offset, but the expected semaphore value is already present
+			// at label_addr + offset. Do not skip the wait. Instead, redirect the wait
+			// only when the label address already contains the exact expected value.
+			if (ctxt == CELL_GCM_CONTEXT_DMA_SEMAPHORE_R)
+			{
+				if (addr != label_candidate_addr &&
+					vm::_ref<u32>(addr) != arg &&
+					vm::_ref<u32>(label_candidate_addr) == arg)
+				{
+					rsx_log.error(
+						"NV406E ACQUIRE redirecting semaphore wait: ctxt=0x%X offset=0x%X old_addr=0x%X new_addr=0x%X expected=0x%X old_observed=0x%X new_observed=0x%X",
+						ctxt,
+						offset,
+						addr,
+						label_candidate_addr,
+						arg,
+						vm::_ref<u32>(addr),
+						vm::_ref<u32>(label_candidate_addr));
+
+					addr = label_candidate_addr;
+				}
+			}
 
 			// Synchronization point, may be associated with memory changes without actually changing addresses
 			RSX(ctx)->m_graphics_state |= rsx::pipeline_state::fragment_program_needs_rehash;
 
 			const auto& sema = vm::_ref<u32>(addr);
-			const u32 label_candidate_addr = RSX(ctx)->label_addr + offset;
-			const u32 device_candidate_addr = RSX(ctx)->device_addr + offset;
 			const auto& label_candidate = vm::_ref<u32>(label_candidate_addr);
 			const auto& device_candidate = vm::_ref<u32>(device_candidate_addr);
-			const bool watch = (addr == 0x40000800 || offset == 0x800);
+			const bool watch = (addr == 0x40000800 || addr == 0x40300800 || offset == 0x800);
 
 			if (watch)
 			{
 				rsx_log.error(
-					"NV406E ACQUIRE start: ctxt=0x%X offset=0x%X addr=0x%X expected=0x%X observed=0x%X label_addr=0x%X device_addr=0x%X",
+					"NV406E ACQUIRE start: ctxt=0x%X offset=0x%X addr=0x%X expected=0x%X observed=0x%X label_addr=0x%X device_addr=0x%X label_candidate_addr=0x%X label_candidate=0x%X device_candidate_addr=0x%X device_candidate=0x%X",
 					ctxt,
 					offset,
 					addr,
 					arg,
 					static_cast<u32>(sema),
 					RSX(ctx)->label_addr,
-					RSX(ctx)->device_addr);
+					RSX(ctx)->device_addr,
+					label_candidate_addr,
+					static_cast<u32>(label_candidate),
+					device_candidate_addr,
+					static_cast<u32>(device_candidate));
 			}
 
 			if (sema == arg)
