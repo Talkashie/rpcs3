@@ -32,7 +32,10 @@ namespace rsx
 			RSX(ctx)->m_graphics_state |= rsx::pipeline_state::fragment_program_needs_rehash;
 
 			const auto& sema = vm::_ref<u32>(addr);
-
+			const u32 label_candidate_addr = RSX(ctx)->label_addr + offset;
+			const u32 device_candidate_addr = RSX(ctx)->device_addr + offset;
+			const auto& label_candidate = vm::_ref<u32>(label_candidate_addr);
+			const auto& device_candidate = vm::_ref<u32>(device_candidate_addr);
 			const bool watch = (addr == 0x40000800 || offset == 0x800);
 
 			if (watch)
@@ -90,12 +93,16 @@ namespace rsx
 				if (watch && current - last_debug_val > 1'000'000)
 				{
 					rsx_log.error(
-						"NV406E ACQUIRE waiting: ctxt=0x%X offset=0x%X addr=0x%X expected=0x%X observed=0x%X elapsed=0x%llX",
+						"NV406E ACQUIRE waiting: ctxt=0x%X offset=0x%X addr=0x%X expected=0x%X observed=0x%X label_candidate_addr=0x%X label_candidate=0x%X device_candidate_addr=0x%X device_candidate=0x%X elapsed=0x%llX",
 						ctxt,
 						offset,
 						addr,
 						arg,
 						static_cast<u32>(sema),
+						label_candidate_addr,
+						static_cast<u32>(label_candidate),
+						device_candidate_addr,
+						static_cast<u32>(device_candidate),
 						current - start);
 
 					last_debug_val = current;
@@ -116,14 +123,18 @@ namespace rsx
 					if ((current - start) > tdr)
 					{
 						rsx_log.error(
-							"nv406e::semaphore_acquire has timed out. semaphore_address=0x%X expected=0x%X observed=0x%X ctxt=0x%X offset=0x%X label_addr=0x%X device_addr=0x%X",
+							"nv406e::semaphore_acquire has timed out. semaphore_address=0x%X expected=0x%X observed=0x%X ctxt=0x%X offset=0x%X label_addr=0x%X device_addr=0x%X label_candidate_addr=0x%X label_candidate=0x%X device_candidate_addr=0x%X device_candidate=0x%X",
 							addr,
 							arg,
 							static_cast<u32>(sema),
 							ctxt,
 							offset,
 							RSX(ctx)->label_addr,
-							RSX(ctx)->device_addr);
+							RSX(ctx)->device_addr,
+							label_candidate_addr,
+							static_cast<u32>(label_candidate),
+							device_candidate_addr,
+							static_cast<u32>(device_candidate));
 
 						break;
 					}
