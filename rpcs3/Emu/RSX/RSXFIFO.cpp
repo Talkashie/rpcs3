@@ -717,18 +717,6 @@ namespace rsx
 			}
 			if ((cmd & RSX_METHOD_CALL_CMD_MASK) == RSX_METHOD_CALL_CMD)
 			{
-				const u32 offs = cmd & RSX_METHOD_CALL_OFFSET_MASK;
-
-				rsx_log.error(
-					"FIFO DBG CALL: cmd=0x%X offs=0x%X get=0x%X put=0x%X ret_before=0x%X last_cmd=0x%X last_code_start=0x%X",
-					cmd,
-					offs,
-					fifo_ctrl->get_pos(),
-					ctrl->put & ~3,
-					fifo_ret_addr,
-					get_fifo_cmd(),
-					last_known_code_start);
-
 				if (fifo_ret_addr != RSX_CALL_STACK_EMPTY)
 				{
 					// Only one layer is allowed in the call stack.
@@ -737,55 +725,41 @@ namespace rsx
 					return;
 				}
 
-				fifo_ret_addr = fifo_ctrl->get_pos() + 4;
+				const u32 offs = cmd & RSX_METHOD_CALL_OFFSET_MASK;
 
 				rsx_log.error(
-					"FIFO DBG CALL SET_RET: new_ret=0x%X jumping_to=0x%X",
-					fifo_ret_addr,
-					offs);
+				"FIFO DBG CALL: cmd=0x%X offs=0x%X get=0x%X put=0x%X ret_before=0x%X last_cmd=0x%X last_code_start=0x%X",
+				cmd,
+				offs,
+				fifo_ctrl->get_pos(),
+				ctrl->put & ~3,
+				fifo_ret_addr,
+				get_fifo_cmd(),
+				last_known_code_start);
 
+				fifo_ret_addr = fifo_ctrl->get_pos() + 4;
 				fifo_ctrl->set_get(offs);
 				last_known_code_start = offs;
 				return;
 			}
-
 			if ((cmd & RSX_METHOD_RETURN_MASK) == RSX_METHOD_RETURN_CMD)
 			{
-				if ((cmd & RSX_METHOD_RETURN_MASK) == RSX_METHOD_RETURN_CMD)
+
+				rsx_log.error(
+				"FIFO DBG RET: cmd=0x%X get=0x%X put=0x%X ret_addr=0x%X last_cmd=0x%X last_code_start=0x%X",
+				cmd,
+				fifo_ctrl->get_pos(),
+				ctrl->put & ~3,
+				fifo_ret_addr,
+				get_fifo_cmd(),
+				last_known_code_start);
+
+				if (fifo_ret_addr == RSX_CALL_STACK_EMPTY)
 				{
-					const u32 get_pos = fifo_ctrl->get_pos();
-					const u32 put_pos = ctrl->put & ~3;
-
-					const auto read_fifo_word = [&](u32 fifo_addr) -> u32
-					{
-						const u32 real_addr = iomap_table.get_addr(fifo_addr);
-						return real_addr != umax ? vm::read32(real_addr) : umax;
-					};
-
-					rsx_log.error(
-						"FIFO DBG RET: cmd=0x%X get=0x%X put=0x%X ret_addr=0x%X last_cmd=0x%X last_code_start=0x%X prev16=0x%X prev12=0x%X prev8=0x%X prev4=0x%X cur=0x%X next4=0x%X next8=0x%X",
-						cmd,
-						get_pos,
-						put_pos,
-						fifo_ret_addr,
-						get_fifo_cmd(),
-						last_known_code_start,
-						read_fifo_word(get_pos - 16),
-						read_fifo_word(get_pos - 12),
-						read_fifo_word(get_pos - 8),
-						read_fifo_word(get_pos - 4),
-						read_fifo_word(get_pos),
-						read_fifo_word(get_pos + 4),
-						read_fifo_word(get_pos + 8));
-
-					if (fifo_ret_addr == RSX_CALL_STACK_EMPTY)
-					{
-						rsx_log.error("FIFO: RET found without corresponding CALL (last cmd = 0x%x)", get_fifo_cmd());
-						recover_fifo();
-						return;
-					}
-
-					// Optimize returning to another CALL
+					rsx_log.error("FIFO: RET found without corresponding CALL (last cmd = 0x%x)", get_fifo_cmd());
+					recover_fifo();
+					return;
+				}
 
 				// Optimize returning to another CALL
 				if ((ctrl->put & ~3) != fifo_ret_addr)
