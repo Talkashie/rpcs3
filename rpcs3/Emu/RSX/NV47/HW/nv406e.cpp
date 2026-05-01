@@ -46,8 +46,8 @@ namespace rsx
 				vm::_ref<u32>(addr) != arg &&
 				vm::_ref<u32>(label_candidate_addr) == arg)
 			{
-				rsx_log.error(
-					"NV406E ACQUIRE redirecting semaphore wait: ctxt=0x%X offset=0x%X old_addr=0x%X new_addr=0x%X expected=0x%X old_observed=0x%X new_observed=0x%X",
+				rsx_log.warning(
+					"NV406E semaphore acquire redirected from device to label memory. ctxt=0x%X offset=0x%X old_addr=0x%X new_addr=0x%X expected=0x%X old_observed=0x%X new_observed=0x%X",
 					ctxt,
 					offset,
 					addr,
@@ -63,36 +63,9 @@ namespace rsx
 			RSX(ctx)->m_graphics_state |= rsx::pipeline_state::fragment_program_needs_rehash;
 
 			const auto& sema = vm::_ref<u32>(addr);
-			const bool watch = (addr == 0x40000800 || addr == 0x40300800 || offset == 0x800);
-
-			if (watch)
-			{
-				rsx_log.error(
-					"NV406E ACQUIRE start: ctxt=0x%X offset=0x%X addr=0x%X expected=0x%X observed=0x%X label_candidate_addr=0x%X label_candidate=0x%X device_candidate_addr=0x%X device_candidate=0x%X label_addr=0x%X device_addr=0x%X",
-					ctxt,
-					offset,
-					addr,
-					arg,
-					static_cast<u32>(sema),
-					label_candidate_addr,
-					vm::_ref<u32>(label_candidate_addr),
-					device_candidate_addr,
-					vm::_ref<u32>(device_candidate_addr),
-					RSX(ctx)->label_addr,
-					RSX(ctx)->device_addr);
-			}
 
 			if (sema == arg)
 			{
-				if (watch)
-				{
-					rsx_log.error(
-						"NV406E ACQUIRE immediate success: addr=0x%X expected=0x%X observed=0x%X",
-						addr,
-						arg,
-						static_cast<u32>(sema));
-				}
-
 				// Flip semaphore doesnt need wake-up delay
 				if (addr != RSX(ctx)->label_addr + 0x10)
 				{
@@ -109,7 +82,6 @@ namespace rsx
 
 			u64 start = get_system_time();
 			u64 last_check_val = start;
-			u64 last_debug_val = start;
 
 			while (sema != arg)
 			{
@@ -119,28 +91,10 @@ namespace rsx
 					return;
 				}
 
-				const u64 current = get_system_time();
-
-				if (watch && current - last_debug_val > 1'000'000)
-				{
-					rsx_log.error(
-						"NV406E ACQUIRE waiting: ctxt=0x%X offset=0x%X addr=0x%X expected=0x%X observed=0x%X label_candidate_addr=0x%X label_candidate=0x%X device_candidate_addr=0x%X device_candidate=0x%X elapsed=0x%llX",
-						ctxt,
-						offset,
-						addr,
-						arg,
-						static_cast<u32>(sema),
-						label_candidate_addr,
-						vm::_ref<u32>(label_candidate_addr),
-						device_candidate_addr,
-						vm::_ref<u32>(device_candidate_addr),
-						current - start);
-
-					last_debug_val = current;
-				}
-
 				if (const auto tdr = static_cast<u64>(g_cfg.video.driver_recovery_timeout))
 				{
+					const u64 current = get_system_time();
+
 					if (current - last_check_val > 20'000)
 					{
 						// Suspicious amount of time has passed
@@ -153,36 +107,13 @@ namespace rsx
 
 					if ((current - start) > tdr)
 					{
-						rsx_log.error(
-							"nv406e::semaphore_acquire has timed out. semaphore_address=0x%X expected=0x%X observed=0x%X ctxt=0x%X offset=0x%X label_addr=0x%X device_addr=0x%X label_candidate_addr=0x%X label_candidate=0x%X device_candidate_addr=0x%X device_candidate=0x%X",
-							addr,
-							arg,
-							static_cast<u32>(sema),
-							ctxt,
-							offset,
-							RSX(ctx)->label_addr,
-							RSX(ctx)->device_addr,
-							label_candidate_addr,
-							vm::_ref<u32>(label_candidate_addr),
-							device_candidate_addr,
-							vm::_ref<u32>(device_candidate_addr));
-
+						// If longer than driver timeout force exit
+						rsx_log.error("nv406e::semaphore_acquire has timed out. semaphore_address=0x%X", addr);
 						break;
 					}
 				}
 
 				RSX(ctx)->cpu_wait({});
-			}
-
-			if (watch)
-			{
-				rsx_log.error(
-					"NV406E ACQUIRE end: ctxt=0x%X offset=0x%X addr=0x%X expected=0x%X observed=0x%X",
-					ctxt,
-					offset,
-					addr,
-					arg,
-					static_cast<u32>(sema));
 			}
 
 			RSX(ctx)->fifo_wake_delay();
