@@ -756,8 +756,16 @@ namespace rsx
 
 				if (fifo_ret_addr == RSX_CALL_STACK_EMPTY)
 				{
-					rsx_log.error("FIFO: RET found without corresponding CALL (last cmd = 0x%x)", get_fifo_cmd());
-					recover_fifo();
+					rsx_log.warning(
+						"FIFO: RET found without corresponding CALL, skipping. cmd=0x%X get=0x%X put=0x%X last_cmd=0x%X last_code_start=0x%X",
+						cmd,
+						fifo_ctrl->get_pos(),
+						ctrl->put & ~3,
+						get_fifo_cmd(),
+						last_known_code_start);
+
+					fifo_ctrl->set_get(fifo_ctrl->get_pos() + 4);
+					last_known_code_start = fifo_ctrl->get_pos();
 					return;
 				}
 
