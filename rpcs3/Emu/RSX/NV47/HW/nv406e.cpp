@@ -24,15 +24,41 @@ namespace rsx
 		{
 			RSX(ctx)->sync_point_request.release(true);
 
-			const u32 addr = get_address(REGS(ctx)->semaphore_offset_406e(), REGS(ctx)->semaphore_context_dma_406e());
+			const u32 offset = REGS(ctx)->semaphore_offset_406e();
+			const u32 ctxt = REGS(ctx)->semaphore_context_dma_406e();
+			const u32 addr = get_address(offset, ctxt);
 
-			// Syncronization point, may be associated with memory changes without actually changing addresses
+			// Synchronization point, may be associated with memory changes without actually changing addresses
 			RSX(ctx)->m_graphics_state |= rsx::pipeline_state::fragment_program_needs_rehash;
 
 			const auto& sema = vm::_ref<u32>(addr);
 
+			const bool watch = (addr == 0x40000800 || offset == 0x800);
+
+			if (watch)
+			{
+				rsx_log.error(
+					"NV406E ACQUIRE start: ctxt=0x%X offset=0x%X addr=0x%X expected=0x%X observed=0x%X label_addr=0x%X device_addr=0x%X",
+					ctxt,
+					offset,
+					addr,
+					arg,
+					static_cast<u32>(sema),
+					RSX(ctx)->label_addr,
+					RSX(ctx)->device_addr);
+			}
+
 			if (sema == arg)
 			{
+				if (watch)
+				{
+					rsx_log.error(
+						"NV406E ACQUIRE immediate success: addr=0x%X expected=0x%X observed=0x%X",
+						addr,
+						arg,
+						static_cast<u32>(sema));
+				}
+
 				// Flip semaphore doesnt need wake-up delay
 				if (addr != RSX(ctx)->label_addr + 0x10)
 				{
@@ -49,6 +75,7 @@ namespace rsx
 
 			u64 start = get_system_time();
 			u64 last_check_val = start;
+			u64 last_debug_val = start;
 
 			while (sema != arg)
 			{
@@ -58,10 +85,24 @@ namespace rsx
 					return;
 				}
 
+				const u64 current = get_system_time();
+
+				if (watch && current - last_debug_val > 1'000'000)
+				{
+					rsx_log.error(
+						"NV406E ACQUIRE waiting: ctxt=0x%X offset=0x%X addr=0x%X expected=0x%X observed=0x%X elapsed=0x%llX",
+						ctxt,
+						offset,
+						addr,
+						arg,
+						static_cast<u32>(sema),
+						current - start);
+
+					last_debug_val = current;
+				}
+
 				if (const auto tdr = static_cast<u64>(g_cfg.video.driver_recovery_timeout))
 				{
-					const u64 current = get_system_time();
-
 					if (current - last_check_val > 20'000)
 					{
 						// Suspicious amount of time has passed
@@ -74,13 +115,32 @@ namespace rsx
 
 					if ((current - start) > tdr)
 					{
-						// If longer than driver timeout force exit
-						rsx_log.error("nv406e::semaphore_acquire has timed out. semaphore_address=0x%X", addr);
+						rsx_log.error(
+							"nv406e::semaphore_acquire has timed out. semaphore_address=0x%X expected=0x%X observed=0x%X ctxt=0x%X offset=0x%X label_addr=0x%X device_addr=0x%X",
+							addr,
+							arg,
+							static_cast<u32>(sema),
+							ctxt,
+							offset,
+							RSX(ctx)->label_addr,
+							RSX(ctx)->device_addr);
+
 						break;
 					}
 				}
 
 				RSX(ctx)->cpu_wait({});
+			}
+
+			if (watch)
+			{
+				rsx_log.error(
+					"NV406E ACQUIRE end: ctxt=0x%X offset=0x%X addr=0x%X expected=0x%X observed=0x%X",
+					ctxt,
+					offset,
+					addr,
+					arg,
+					static_cast<u32>(sema));
 			}
 
 			RSX(ctx)->fifo_wake_delay();
@@ -102,13 +162,28 @@ namespace rsx
 
 			// By avoiding doing this on flip's semaphore release
 			// We allow last gcm's registers reset to occur in case of a crash
-			if (const bool is_flip_sema = (offset == 0x10 && ctxt == CELL_GCM_CONTEXT_DMA_SEMAPHORE_R);
-				!is_flip_sema)
+			if (const bool is_flip_sema = (offset == 0x10 && ctxt == CELL_GCM_CONTEXT_DMA_SEMAPHORE_R); !is_flip_sema)
 			{
 				RSX(ctx)->sync_point_request.release(true);
 			}
 
 			const u32 addr = get_address(offset, ctxt);
+
+			const bool watch = (addr == 0x40000800 || offset == 0x800);
+
+			if (watch)
+			{
+				rsx_log.error(
+					"NV406E RELEASE before: ctxt=0x%X offset=0x%X addr=0x%X value=0x%X observed_before=0x%X reg=0x%X label_addr=0x%X device_addr=0x%X",
+					ctxt,
+					offset,
+					addr,
+					arg,
+					vm::_ref<u32>(addr),
+					reg,
+					RSX(ctx)->label_addr,
+					RSX(ctx)->device_addr);
+			}
 
 			// TODO: Check if possible to write on reservations
 			if (RSX(ctx)->label_addr >> 28 != addr >> 28)
@@ -124,7 +199,18 @@ namespace rsx
 				arg = 1;
 			}
 
-			util::write_gcm_label<true, true>(ctx, reg, addr, arg);
+			util::write_gcm_label<false, true>(ctx, reg, addr, arg);
+
+			if (watch)
+			{
+				rsx_log.error(
+					"NV406E RELEASE after: ctxt=0x%X offset=0x%X addr=0x%X value=0x%X observed_after=0x%X",
+					ctxt,
+					offset,
+					addr,
+					arg,
+					vm::_ref<u32>(addr));
+			}
 		}
 	}
 }
